@@ -334,17 +334,27 @@ class TetrisGame {
             });
         });
 
-        // Critères d'évaluation ajustés
-        score += (GRID_HEIGHT - testY) * 2;            // Préférer les positions basses
-        score += this.evaluateLines(testGrid) * 12;    // Lignes complètes
-        score -= this.evaluateHoles(testGrid) * 8;     // Pénaliser les trous
-        score -= this.evaluateBlockade(testGrid) * 4;  // Pénaliser les blocages
+        // Nouveaux critères d'évaluation
+        score += this.evaluateLines(testGrid) * 100;      // Fortement récompenser les lignes complètes
+        score -= this.evaluateHoles(testGrid) * 30;       // Fortement pénaliser les trous
+        score -= this.evaluateBlockade(testGrid) * 20;    // Pénaliser les blocages
+        score += this.evaluateHorizontalFill(testGrid) * 10; // Nouveau: Récompenser le remplissage horizontal
+        score -= this.evaluateHeight(testGrid) * 5;       // Nouveau: Pénaliser la hauteur moyenne
 
         return score;
     }
 
-    evaluateHeight(y) {
-        return GRID_HEIGHT - y;
+    evaluateHeight(grid) {
+        let maxHeights = 0;
+        for (let x = 0; x < GRID_WIDTH; x++) {
+            for (let y = 0; y < GRID_HEIGHT; y++) {
+                if (grid[y][x] !== 0) {
+                    maxHeights += GRID_HEIGHT - y;
+                    break;
+                }
+            }
+        }
+        return maxHeights / GRID_WIDTH;
     }
 
     evaluateLines(grid) {
@@ -355,13 +365,16 @@ class TetrisGame {
         let holes = 0;
         for (let x = 0; x < GRID_WIDTH; x++) {
             let block = false;
+            let columnHoles = 0;
             for (let y = 0; y < GRID_HEIGHT; y++) {
                 if (grid[y][x]) {
                     block = true;
                 } else if (block) {
-                    holes++;
+                    columnHoles++;
                 }
             }
+            // Pénaliser plus fortement les trous profonds
+            holes += columnHoles * columnHoles;
         }
         return holes;
     }
@@ -376,6 +389,18 @@ class TetrisGame {
             }
         }
         return blockades;
+    }
+
+    evaluateHorizontalFill(grid) {
+        let score = 0;
+        for (let y = GRID_HEIGHT - 1; y >= 0; y--) {
+            let rowCount = grid[y].filter(cell => cell !== 0).length;
+            if (rowCount > 0) {
+                // Plus la ligne est proche d'être complète, plus le score est élevé
+                score += (rowCount / GRID_WIDTH) * (rowCount / GRID_WIDTH) * 10;
+            }
+        }
+        return score;
     }
 
     wouldCollide(piece, grid, y) {
