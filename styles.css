@@ -1,0 +1,60 @@
+body {
+    margin: 0;
+    padding: 20px;
+    background-color: #1a1a1a;
+    color: white;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.game-area {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    padding: 20px;
+}
+
+.player-section, .ai-section {
+    text-align: center;
+}
+
+canvas {
+    background-color: #000;
+    border: 2px solid #333;
+}
+
+.scores-section {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 20px;
+}
+
+.next-piece {
+    text-align: center;
+}
+
+.controls {
+    background-color: #333;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.score {
+    margin-top: 10px;
+    font-size: 24px;
+    color: #4CAF50;
+}
+
+h2 {
+    color: #4CAF50;
+    margin-bottom: 20px;
+}
+
+h3 {
+    color: #2196F3;
+} 
