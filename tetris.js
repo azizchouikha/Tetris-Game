@@ -35,11 +35,14 @@ class TetrisGame {
         this.gameOver = false;
         this.isHuman = canvasId === 'humanCanvas';
         this.dropCounter = 0;
-        this.dropInterval = 1000; // Temps en ms entre chaque descente automatique
+        this.dropInterval = 1000;
         this.lastTime = 0;
         
         if (this.isHuman) {
             this.setupControls();
+        } else {
+            this.aiMoveDelay = 300; // Augmenté pour plus de fluidité
+            this.aiLastMove = 0;
         }
     }
 
@@ -84,14 +87,17 @@ class TetrisGame {
 
     rotatePiece() {
         const originalShape = this.currentPiece.shape;
-        // Création d'une nouvelle matrice pour la rotation
-        this.currentPiece.shape = this.currentPiece.shape[0].map((_, i) =>
+        const rotated = this.currentPiece.shape[0].map((_, i) =>
             this.currentPiece.shape.map(row => row[i]).reverse()
         );
+        
+        const originalRotation = this.currentPiece.rotation || 0;
+        this.currentPiece.rotation = ((originalRotation + 1) % 4);
+        this.currentPiece.shape = rotated;
 
-        // Annuler la rotation si elle cause une collision
         if (this.checkCollision()) {
             this.currentPiece.shape = originalShape;
+            this.currentPiece.rotation = originalRotation;
         }
         this.draw();
     }
@@ -169,7 +175,9 @@ class TetrisGame {
         this.lastTime = time;
         this.dropCounter += deltaTime;
 
-        if (this.dropCounter > this.dropInterval) {
+        if (!this.isHuman) {
+            this.aiUpdate(time);
+        } else if (this.dropCounter > this.dropInterval) {
             this.movePiece(0, 1);
             this.dropCounter = 0;
         }
@@ -227,6 +235,163 @@ class TetrisGame {
                 });
             });
         }
+    }
+
+    // Ajout des méthodes pour l'IA
+    aiUpdate(time) {
+        if (time - this.aiLastMove > this.aiMoveDelay) {
+            this.aiLastMove = time;
+            this.makeAiMove();
+        }
+    }
+
+    makeAiMove() {
+        if (!this.currentPiece || this.gameOver) return;
+
+        const bestMove = this.findBestMove();
+        if (!bestMove) return;
+
+        // Effectuer les rotations nécessaires
+        const currentRotation = this.currentPiece.rotation || 0;
+        const rotationsNeeded = (bestMove.rotation - currentRotation + 4) % 4;
+        
+        for (let i = 0; i < rotationsNeeded; i++) {
+            this.rotatePiece();
+        }
+
+        // Déplacer horizontalement
+        const moveX = bestMove.x - this.currentPiece.x;
+        if (moveX > 0) {
+            this.movePiece(1, 0);
+        } else if (moveX < 0) {
+            this.movePiece(-1, 0);
+        }
+
+        // Descendre la pièce
+        this.movePiece(0, 1);
+    }
+
+    findBestMove() {
+        let bestScore = -Infinity;
+        let bestMove = null;
+        const originalPiece = {
+            shape: [...this.currentPiece.shape.map(row => [...row])],
+            x: this.currentPiece.x,
+            y: this.currentPiece.y,
+            rotation: this.currentPiece.rotation || 0
+        };
+
+        // Tester toutes les rotations possibles
+        for (let rotation = 0; rotation < 4; rotation++) {
+            let testPiece = {
+                ...originalPiece,
+                rotation: rotation,
+                shape: [...originalPiece.shape.map(row => [...row])]
+            };
+
+            // Appliquer la rotation
+            for (let r = 0; r < rotation; r++) {
+                testPiece.shape = testPiece.shape[0].map((_, i) =>
+                    testPiece.shape.map(row => row[i]).reverse()
+                );
+            }
+
+            // Tester toutes les positions horizontales
+            const pieceWidth = testPiece.shape[0].length;
+            for (let x = 0; x < GRID_WIDTH - pieceWidth + 1; x++) {
+                testPiece.x = x;
+                const score = this.evaluatePosition(testPiece);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMove = { x, rotation };
+                }
+            }
+        }
+
+        return bestMove;
+    }
+
+    evaluatePosition(piece) {
+        let score = 0;
+        const testGrid = this.grid.map(row => [...row]);
+        let testY = piece.y;
+
+        // Simuler la chute
+        while (!this.wouldCollide(piece, testGrid, testY)) {
+            testY++;
+        }
+        testY--;
+
+        // Si la position n'est pas valide, retourner un score très bas
+        if (testY < 0) return -999999;
+
+        // Placer la pièce dans la grille de test
+        piece.shape.forEach((row, dy) => {
+            row.forEach((value, dx) => {
+                if (value && testY + dy >= 0) {
+                    testGrid[testY + dy][piece.x + dx] = piece.color;
+                }
+            });
+        });
+
+        // Critères d'évaluation ajustés
+        score += (GRID_HEIGHT - testY) * 2;            // Préférer les positions basses
+        score += this.evaluateLines(testGrid) * 12;    // Lignes complètes
+        score -= this.evaluateHoles(testGrid) * 8;     // Pénaliser les trous
+        score -= this.evaluateBlockade(testGrid) * 4;  // Pénaliser les blocages
+
+        return score;
+    }
+
+    evaluateHeight(y) {
+        return GRID_HEIGHT - y;
+    }
+
+    evaluateLines(grid) {
+        return grid.filter(row => row.every(cell => cell !== 0)).length;
+    }
+
+    evaluateHoles(grid) {
+        let holes = 0;
+        for (let x = 0; x < GRID_WIDTH; x++) {
+            let block = false;
+            for (let y = 0; y < GRID_HEIGHT; y++) {
+                if (grid[y][x]) {
+                    block = true;
+                } else if (block) {
+                    holes++;
+                }
+            }
+        }
+        return holes;
+    }
+
+    evaluateBlockade(grid) {
+        let blockades = 0;
+        for (let x = 0; x < GRID_WIDTH; x++) {
+            for (let y = GRID_HEIGHT - 2; y >= 0; y--) {
+                if (!grid[y][x] && grid[y + 1][x]) {
+                    blockades++;
+                }
+            }
+        }
+        return blockades;
+    }
+
+    wouldCollide(piece, grid, y) {
+        return piece.shape.some((row, dy) => {
+            return row.some((value, dx) => {
+                if (!value) return false;
+                const newX = piece.x + dx;
+                const newY = y + dy;
+                return (
+                    newX < 0 ||
+                    newX >= GRID_WIDTH ||
+                    newY >= GRID_HEIGHT ||
+                    (newY >= 0 && grid[newY][newX])
+                );
+            });
+        });
     }
 }
 
