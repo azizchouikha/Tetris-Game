@@ -35,7 +35,8 @@ class TetrisGame {
         this.gameOver = false;
         this.isHuman = canvasId === 'humanCanvas';
         this.dropCounter = 0;
-        this.dropInterval = 1000;
+        this.baseDropInterval = 500;
+        this.dropInterval = this.baseDropInterval;
         this.lastTime = 0;
         this.gameOverCallback = null;  // Nouveau: callback pour la fin de partie
         this.gameOverModal = document.getElementById('gameOverModal');
@@ -45,9 +46,21 @@ class TetrisGame {
         if (this.isHuman) {
             this.setupControls();
         } else {
-            this.aiMoveDelay = 300; // Augmenté pour plus de fluidité
+            this.aiMoveDelay = 500; // Modifié de 300 à 100 pour avoir la même vitesse que l'humain
             this.aiLastMove = 0;
         }
+
+        this.opponent = null; // Ajout d'une référence à l'adversaire
+        this.nextPiece = null;
+        this.nextPieceCanvas = this.isHuman ? document.getElementById('nextPieceCanvas') : null;
+        this.nextPieceCtx = this.nextPieceCanvas ? this.nextPieceCanvas.getContext('2d') : null;
+        this.lastSlowdownScore = 0;
+        this.slowdownActive = false;
+        this.slowdownTimeout = null;
+        this.rainbowMode = false;
+        this.rainbowInterval = null;
+        this.rainbowTimeout = null;
+        this.originalColors = { ...COLORS }; // Sauvegarder les couleurs originales
     }
 
     setupControls() {
@@ -88,6 +101,10 @@ class TetrisGame {
         this.currentPiece = null;
         this.dropCounter = 0;
         this.lastTime = 0;
+        this.nextPiece = null;
+        if (this.nextPieceCtx) {
+            this.nextPieceCtx.clearRect(0, 0, this.nextPieceCanvas.width, this.nextPieceCanvas.height);
+        }
         
         // Réinitialiser l'affichage du score
         const scoreElement = document.getElementById(this.isHuman ? 'humanScore' : 'aiScore');
@@ -95,6 +112,23 @@ class TetrisGame {
         
         // Redémarrer le jeu
         this.init();
+        if (this.slowdownTimeout) {
+            clearTimeout(this.slowdownTimeout);
+        }
+        this.dropInterval = this.baseDropInterval;
+        this.slowdownActive = false;
+        this.lastSlowdownScore = 0;
+        if (this.rainbowTimeout) {
+            clearTimeout(this.rainbowTimeout);
+        }
+        if (this.rainbowInterval) {
+            clearInterval(this.rainbowInterval);
+        }
+        this.rainbowMode = false;
+        this.updateColors();
+        if (this.isHuman) {
+            this.startRainbowCycle();
+        }
     }
 
     movePiece(dx, dy) {
@@ -167,24 +201,96 @@ class TetrisGame {
 
     clearLines() {
         let linesCleared = 0;
+        let clearedLineIndices = [];
+
+        // Trouver toutes les lignes complètes
         for (let y = GRID_HEIGHT - 1; y >= 0; y--) {
             if (this.grid[y].every(cell => cell !== 0)) {
-                // Supprimer la ligne complète
-                this.grid.splice(y, 1);
-                // Ajouter une nouvelle ligne vide en haut
-                this.grid.unshift(new Array(GRID_WIDTH).fill(0));
+                clearedLineIndices.push(y);
                 linesCleared++;
-                y++; // Vérifier la même position après avoir fait descendre les lignes
             }
         }
         
-        // Mise à jour du score
+        // Si Tetris (4 lignes), proposer l'échange
+        if (linesCleared === 4 && this.opponent) {
+            // Sauvegarder une ligne pleine pour l'échange
+            const fullLine = [...this.grid[clearedLineIndices[0]]];
+            this.exchangeLine(fullLine);
+        }
+
+        // Supprimer les lignes et mettre à jour le score
+        clearedLineIndices.forEach(y => {
+            this.grid.splice(y, 1);
+            this.grid.unshift(new Array(GRID_WIDTH).fill(0));
+        });
+        
         if (linesCleared > 0) {
             this.updateScore(linesCleared);
+            
+            // Si exactement 2 lignes sont complétées, donner un cadeau à l'adversaire
+            if (linesCleared === 2 && this.opponent) {
+                this.opponent.receiveGift();
+            }
         }
     }
 
+    // Nouvelle méthode pour l'échange de lignes
+    exchangeLine(fullLine) {
+        // Trouver une ligne vide chez l'adversaire
+        let emptyLineIndex = this.findEmptyLine(this.opponent.grid);
+        if (emptyLineIndex !== -1) {
+            // Échanger les lignes
+            const emptyLine = [...this.opponent.grid[emptyLineIndex]];
+            this.opponent.grid[emptyLineIndex] = fullLine;
+            this.grid[this.findFullLine(this.grid)] = emptyLine;
+
+            // Afficher les messages d'échange
+            this.showExchangeMessage("Ligne donnée !");
+            this.opponent.showExchangeMessage("Ligne reçue !");
+        }
+    }
+
+    // Nouvelle méthode pour trouver une ligne vide
+    findEmptyLine(grid) {
+        for (let y = GRID_HEIGHT - 1; y >= 0; y--) {
+            if (grid[y].every(cell => cell === 0)) {
+                return y;
+            }
+        }
+        return -1;
+    }
+
+    // Nouvelle méthode pour trouver une ligne pleine
+    findFullLine(grid) {
+        for (let y = GRID_HEIGHT - 1; y >= 0; y--) {
+            if (grid[y].every(cell => cell !== 0)) {
+                return y;
+            }
+        }
+        return -1;
+    }
+
+    // Nouvelle méthode pour afficher le message d'échange
+    showExchangeMessage(message) {
+        const originalFillStyle = this.ctx.fillStyle;
+        const originalFont = this.ctx.font;
+        const originalTextAlign = this.ctx.textAlign;
+
+        this.ctx.fillStyle = 'rgba(255, 165, 0, 0.7)'; // Orange semi-transparent
+        this.ctx.font = '24px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(message, this.canvas.width / 2, this.canvas.height / 2);
+
+        setTimeout(() => {
+            this.ctx.fillStyle = originalFillStyle;
+            this.ctx.font = originalFont;
+            this.ctx.textAlign = originalTextAlign;
+            this.draw();
+        }, 1000);
+    }
+
     updateScore(linesCleared) {
+        const previousScore = this.score;
         const basePoints = 50;
         const bonusPoints = {
             2: 100,
@@ -200,6 +306,14 @@ class TetrisGame {
         // Mise à jour de l'affichage du score
         const scoreElement = document.getElementById(this.isHuman ? 'humanScore' : 'aiScore');
         scoreElement.textContent = this.score;
+
+        // Vérifier si on doit activer le ralentissement
+        const previousThousand = Math.floor(previousScore / 1000);
+        const currentThousand = Math.floor(this.score / 1000);
+        
+        if (currentThousand > previousThousand) {
+            this.activateSlowdown();
+        }
     }
 
     update(time = 0) {
@@ -225,24 +339,84 @@ class TetrisGame {
     init() {
         this.spawnPiece();
         this.update();
+        
+        // Démarrer le cycle arc-en-ciel si pas déjà démarré
+        if (!this.rainbowInterval && this.isHuman) { // On ne le démarre qu'une fois via le jeu humain
+            this.startRainbowCycle();
+        }
     }
 
     // Création d'une nouvelle pièce
     spawnPiece() {
+        if (this.nextPiece) {
+            // Utiliser la pièce suivante comme pièce courante
+            this.currentPiece = this.nextPiece;
+        } else {
+            // Première pièce du jeu
+            const shapes = Object.keys(SHAPES);
+            const randomShape = shapes[Math.floor(Math.random() * shapes.length)];
+            this.currentPiece = {
+                shape: SHAPES[randomShape],
+                color: COLORS[randomShape],
+                x: Math.floor(GRID_WIDTH / 2) - Math.floor(SHAPES[randomShape][0].length / 2),
+                y: 0
+            };
+        }
+
+        // Générer la prochaine pièce
         const shapes = Object.keys(SHAPES);
         const randomShape = shapes[Math.floor(Math.random() * shapes.length)];
-        this.currentPiece = {
+        this.nextPiece = {
             shape: SHAPES[randomShape],
             color: COLORS[randomShape],
             x: Math.floor(GRID_WIDTH / 2) - Math.floor(SHAPES[randomShape][0].length / 2),
             y: 0
         };
 
+        // Afficher la prochaine pièce si c'est le joueur humain
+        if (this.isHuman) {
+            this.drawNextPiece();
+        }
+
         // Vérifier si la nouvelle pièce peut être placée
         if (this.checkCollision()) {
             this.gameOver = true;
             this.handleGameOver();
         }
+    }
+
+    // Nouvelle méthode pour dessiner la prochaine pièce
+    drawNextPiece() {
+        if (!this.nextPieceCtx || !this.nextPiece) return;
+
+        this.nextPieceCtx.clearRect(0, 0, this.nextPieceCanvas.width, this.nextPieceCanvas.height);
+        
+        const blockSize = 25;
+        const pieceWidth = this.nextPiece.shape[0].length * blockSize;
+        const pieceHeight = this.nextPiece.shape.length * blockSize;
+        const startX = (this.nextPieceCanvas.width - pieceWidth) / 2;
+        const startY = (this.nextPieceCanvas.height - pieceHeight) / 2;
+
+        if (this.rainbowMode) {
+            this.nextPieceCtx.shadowColor = this.nextPiece.color;
+            this.nextPieceCtx.shadowBlur = 15;
+        }
+
+        this.nextPieceCtx.fillStyle = this.nextPiece.color;
+        this.nextPiece.shape.forEach((row, y) => {
+            row.forEach((value, x) => {
+                if (value) {
+                    this.nextPieceCtx.fillRect(
+                        startX + x * blockSize,
+                        startY + y * blockSize,
+                        blockSize - 1,
+                        blockSize - 1
+                    );
+                }
+            });
+        });
+
+        this.nextPieceCtx.shadowBlur = 0;
     }
 
     // Dessin du jeu
@@ -253,6 +427,13 @@ class TetrisGame {
         this.grid.forEach((row, y) => {
             row.forEach((value, x) => {
                 if (value) {
+                    if (this.rainbowMode) {
+                        // Ajouter un effet de lueur
+                        this.ctx.shadowColor = value;
+                        this.ctx.shadowBlur = 10;
+                    } else {
+                        this.ctx.shadowBlur = 0;
+                    }
                     this.ctx.fillStyle = value;
                     this.ctx.fillRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE - 1, BLOCK_SIZE - 1);
                 }
@@ -261,6 +442,10 @@ class TetrisGame {
 
         // Dessin de la pièce courante
         if (this.currentPiece) {
+            if (this.rainbowMode) {
+                this.ctx.shadowColor = this.currentPiece.color;
+                this.ctx.shadowBlur = 15;
+            }
             this.ctx.fillStyle = this.currentPiece.color;
             this.currentPiece.shape.forEach((row, y) => {
                 row.forEach((value, x) => {
@@ -275,6 +460,9 @@ class TetrisGame {
                 });
             });
         }
+        
+        // Réinitialiser les effets de shadow
+        this.ctx.shadowBlur = 0;
     }
 
     // Ajout des méthodes pour l'IA
@@ -512,11 +700,203 @@ class TetrisGame {
         document.getElementById('finalAIScore').textContent = aiGame.score;
         this.gameOverModal.style.display = 'block';
     }
+
+    // Nouvelle méthode pour recevoir un cadeau
+    receiveGift() {
+        // Sauvegarder la pièce actuelle
+        const currentPiece = this.currentPiece;
+        
+        // Forcer la prochaine pièce à être un carré ou une ligne
+        const easyPieces = ['O', 'I']; // O pour carré, I pour ligne
+        const randomEasyPiece = easyPieces[Math.floor(Math.random() * easyPieces.length)];
+        
+        this.currentPiece = {
+            shape: SHAPES[randomEasyPiece],
+            color: COLORS[randomEasyPiece],
+            x: Math.floor(GRID_WIDTH / 2) - Math.floor(SHAPES[randomEasyPiece][0].length / 2),
+            y: 0
+        };
+
+        // Afficher un message de cadeau
+        this.showGiftMessage();
+    }
+
+    // Nouvelle méthode pour afficher le message de cadeau
+    showGiftMessage() {
+        const originalFillStyle = this.ctx.fillStyle;
+        const originalFont = this.ctx.font;
+        const originalTextAlign = this.ctx.textAlign;
+
+        this.ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
+        this.ctx.font = '24px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('Cadeau !', this.canvas.width / 2, this.canvas.height / 2);
+
+        // Restaurer les styles originaux après 1 seconde
+        setTimeout(() => {
+            this.ctx.fillStyle = originalFillStyle;
+            this.ctx.font = originalFont;
+            this.ctx.textAlign = originalTextAlign;
+            this.draw();
+        }, 1000);
+    }
+
+    // Nouvelle méthode pour activer le ralentissement
+    activateSlowdown() {
+        // Activer le ralentissement pour les deux joueurs
+        humanGame.applySlowdown();
+        aiGame.applySlowdown();
+    }
+
+    // Nouvelle méthode pour appliquer le ralentissement
+    applySlowdown() {
+        if (this.slowdownTimeout) {
+            clearTimeout(this.slowdownTimeout);
+        }
+
+        // Ralentir de 20%
+        this.dropInterval = this.baseDropInterval * 1.2;
+        if (!this.isHuman) {
+            this.aiMoveDelay = this.aiMoveDelay * 1.2;
+        }
+        
+        this.slowdownActive = true;
+        this.showSlowdownMessage();
+
+        // Restaurer la vitesse normale après 10 secondes
+        this.slowdownTimeout = setTimeout(() => {
+            this.dropInterval = this.baseDropInterval;
+            if (!this.isHuman) {
+                this.aiMoveDelay = this.aiMoveDelay / 1.2;
+            }
+            this.slowdownActive = false;
+        }, 10000);
+    }
+
+    // Nouvelle méthode pour afficher le message de ralentissement
+    showSlowdownMessage() {
+        const originalFillStyle = this.ctx.fillStyle;
+        const originalFont = this.ctx.font;
+        const originalTextAlign = this.ctx.textAlign;
+
+        this.ctx.fillStyle = 'rgba(0, 255, 255, 0.7)';
+        this.ctx.font = '24px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('Ralentissement !', this.canvas.width / 2, this.canvas.height / 2);
+
+        setTimeout(() => {
+            this.ctx.fillStyle = originalFillStyle;
+            this.ctx.font = originalFont;
+            this.ctx.textAlign = originalTextAlign;
+            this.draw();
+        }, 1000);
+    }
+
+    // Nouvelle méthode pour démarrer le cycle arc-en-ciel
+    startRainbowCycle() {
+        this.rainbowInterval = setInterval(() => {
+            this.activateRainbowMode();
+        }, 30000); // Modifié de 120000 (2 minutes) à 30000 (30 secondes)
+    }
+
+    // Nouvelle méthode pour activer le mode arc-en-ciel
+    activateRainbowMode() {
+        // Activer pour les deux joueurs
+        humanGame.applyRainbowMode(true);
+        aiGame.applyRainbowMode(true);
+
+        // Désactiver après 20 secondes
+        if (this.rainbowTimeout) {
+            clearTimeout(this.rainbowTimeout);
+        }
+        
+        this.rainbowTimeout = setTimeout(() => {
+            humanGame.applyRainbowMode(false);
+            aiGame.applyRainbowMode(false);
+        }, 20000);
+    }
+
+    // Nouvelle méthode pour appliquer/désactiver le mode arc-en-ciel
+    applyRainbowMode(activate) {
+        this.rainbowMode = activate;
+        if (activate) {
+            this.showRainbowMessage();
+        }
+        this.updateColors();
+    }
+
+    // Nouvelle méthode pour mettre à jour les couleurs
+    updateColors() {
+        if (this.rainbowMode) {
+            // Générer des couleurs vives et brillantes aléatoires
+            Object.keys(COLORS).forEach(shape => {
+                COLORS[shape] = this.generateRainbowColor();
+            });
+
+            // Ajouter un effet de brillance aux pièces
+            if (this.currentPiece) {
+                this.currentPiece.glow = true;
+            }
+            if (this.nextPiece) {
+                this.nextPiece.glow = true;
+            }
+        } else {
+            // Restaurer les couleurs originales
+            Object.keys(COLORS).forEach(shape => {
+                COLORS[shape] = this.originalColors[shape];
+            });
+
+            // Retirer l'effet de brillance
+            if (this.currentPiece) {
+                this.currentPiece.glow = false;
+            }
+            if (this.nextPiece) {
+                this.nextPiece.glow = false;
+            }
+        }
+
+        this.draw();
+        if (this.isHuman) {
+            this.drawNextPiece();
+        }
+    }
+
+    // Nouvelle méthode pour générer une couleur vive et brillante aléatoire
+    generateRainbowColor() {
+        const hue = Math.random() * 360;
+        const saturation = 100; // Maximum saturation
+        const lightness = 60; // Plus de luminosité (50-70 est un bon range pour des couleurs vives)
+        const alpha = 0.9; // Légère transparence pour l'effet brillant
+        return `hsla(${hue}, ${saturation}%, ${lightness}%, ${alpha})`;
+    }
+
+    // Nouvelle méthode pour afficher le message arc-en-ciel
+    showRainbowMessage() {
+        const originalFillStyle = this.ctx.fillStyle;
+        const originalFont = this.ctx.font;
+        const originalTextAlign = this.ctx.textAlign;
+
+        this.ctx.fillStyle = 'rgba(255, 192, 203, 0.7)'; // Rose semi-transparent
+        this.ctx.font = '24px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('Mode Arc-en-ciel !', this.canvas.width / 2, this.canvas.height / 2);
+
+        setTimeout(() => {
+            this.ctx.fillStyle = originalFillStyle;
+            this.ctx.font = originalFont;
+            this.ctx.textAlign = originalTextAlign;
+            this.draw();
+        }, 1000);
+    }
 }
 
 // Initialisation des jeux
 const humanGame = new TetrisGame('humanCanvas');
 const aiGame = new TetrisGame('aiCanvas');
+
+// Lier les adversaires
+humanGame.opponent = aiGame;
+aiGame.opponent = humanGame;
 
 // Ajouter des callbacks de fin de partie
 humanGame.gameOverCallback = (score) => {
@@ -531,4 +911,5 @@ aiGame.gameOverCallback = (score) => {
 
 // Démarrage des jeux
 humanGame.init();
+aiGame.init(); 
 aiGame.init(); 
