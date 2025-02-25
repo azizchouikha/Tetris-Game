@@ -1,0 +1,25 @@
+-Création initiale du jeu Tetris avec un joueur humain contre une IA
+-Ajout de la condition de fin de partie :
+La condition de fin de partie dans Tetris est généralement atteinte lorsqu'un nouveau tétrimino ne peut plus être placé sur le plateau parce qu'il y a un empilement de blocs atteignant ou dépassant la ligne supérieure de la grille.
+-mon IA ne fait que placer les pièces à gauche "corrige moi ce problème"
+
+- maintenant on va passer à l'Ajout des fonctionnalités bonus :
+1. Cadeau surprise
+Quand un joueur complète 2 lignes d'un coup, l'adversaire reçoit une "pièce facile" (ex. : un carré ou une ligne droite) pour l'aider un peu.
+
+2. Pause douceur
+Tous les 1 000 points, les pièces tombent 20 % plus lentement pendant 10 secondes pour les deux joueurs – un petit répit pour souffler !
+
+4. Échange amical
+Si un joueur fait un Tetris (4 lignes), il peut échanger une de ses lignes pleines avec une ligne vide de l'adversaire – un coup de pouce mutuel !
+
+5. Arc-en-ciel
+Toutes les 2 minutes (modifié à 30 secondes), les pièces changent de couleur pendant 20 secondes pour rendre le jeu plus joli (pas de piège, juste du fun visuel).
+
+-Ajustements de vitesse :
+Modification de la vitesse de chute des pièces
+Ajustement de la vitesse de l'IA
+
+- Ajout de l'affichage de la prochaine pièce pour le joueur humain
+
+-Amélioration de l'effet arc-en-ciel pour avoir des pièces multicolores et lumineuses
